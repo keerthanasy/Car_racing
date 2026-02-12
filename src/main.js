@@ -117,6 +117,17 @@ const curve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-800, 0, -60),
   new THREE.Vector3(-1000, 0, 0),
   new THREE.Vector3(-1200, 0, 0),
+  new THREE.Vector3(-1400, 0, 0),
+  new THREE.Vector3(-1600, 0, 40),
+  new THREE.Vector3(-1800, 0, -40),
+  new THREE.Vector3(-2000, 0, 0),
+  new THREE.Vector3(-2200, 0, 0),
+  // Bridge Section
+  new THREE.Vector3(-2400, 0, 0), 
+  new THREE.Vector3(-2600, 20, 0), // Peak
+  new THREE.Vector3(-2800, 20, 0), // Flat
+  new THREE.Vector3(-3000, 0, 0), // End bridge
+  new THREE.Vector3(-3200, 0, 0),
 ]);
 
 // Helper to visualize the curve (optional, for debugging)
@@ -127,7 +138,7 @@ const curve = new THREE.CatmullRomCurve3([
 
 // Custom Ribbon Geometry generation for perfect UV control
 const roadWidth = 18;
-const roadSegments = 400;
+const roadSegments = 1200;
 const roadWidthHalf = roadWidth / 2;
 const roadGeoPoints = curve.getSpacedPoints(roadSegments);
 const roadGeometry = new THREE.BufferGeometry();
@@ -295,6 +306,8 @@ scene.add(grassPlane);
 // Physics for the road
 // Since the road is perfectly flat at Y=0, we use a global Plane for robust physics.
 // This prevents any "falling through" issues with Trimesh and is much more performant.
+// Physics for the road - Reverted to Plane for robust flat road physics
+// The bridge physics will be handled separately in generateBridge using boxes
 const groundShape = new CANNON.Plane();
 const groundBody = new CANNON.Body({
    mass: 0, // static
@@ -403,7 +416,8 @@ const createWindowTexture = () => {
     for (let y = 2; y < 62; y += 2) {
         for (let x = 2; x < 30; x += 2) {
         if (Math.random() > 0.6) {
-            context.fillStyle = Math.random() < 0.5 ? "#ffcc00" : "#ffaa00"; // Warm/Yellow
+            const colors = ["#ffcc00", "#ffaa00", "#00ffff", "#ff00ff", "#33ff33", "#ffffff"];
+            context.fillStyle = colors[Math.floor(Math.random() * colors.length)];
             context.fillRect(x, y, 1, 1);
         }
         }
@@ -416,17 +430,79 @@ const createWindowTexture = () => {
 
 const windowTexture = createWindowTexture();
 
+// Global building material with custom blinking shader
+const buildingMat = new THREE.MeshStandardMaterial({
+  color: 0x111111,
+  roughness: 0.9, 
+  metalness: 0.1, 
+  emissiveMap: windowTexture,
+  emissive: 0xffffff,
+  emissiveIntensity: 0.8
+});
+
+buildingMat.onBeforeCompile = (shader) => {
+  shader.uniforms.time = { value: 0 };
+  buildingMat.userData.shader = shader;
+
+  // 1. Modify Vertex Shader to pass world position
+  shader.vertexShader = `
+    varying vec3 vWorldPos;
+  ` + shader.vertexShader;
+  
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <worldpos_vertex>',
+    `
+    #include <worldpos_vertex>
+    vWorldPos = (modelMatrix * vec4(transformDirection( position, modelMatrix ), 1.0)).xyz;
+    // Fallback if transformDirection isn't enough, usually modelMatrix * vec4(position, 1.0) is standard
+    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz; 
+    `
+  );
+
+  // 2. Modify Fragment Shader to use world position for unique blinking
+  shader.fragmentShader = `
+    uniform float time;
+    varying vec3 vWorldPos;
+  ` + shader.fragmentShader;
+
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <emissivemap_fragment>',
+    `
+    #ifdef USE_EMISSIVEMAP
+      vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );
+      
+      // Identify distinct windows on the texture
+      vec2 pixel = floor(vEmissiveMapUv * vec2(32.0, 64.0));
+      float pixelRnd = fract(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453);
+
+      // Identify distinct buildings using World Position
+      // Use floor to keep it constant across the face of one building
+      float buildingSeed = fract(sin(dot(floor(vWorldPos.xz * 0.1), vec2(12.9898, 78.233))) * 43758.5453);
+
+      // Combine to get a unique seed for this specific window on this specific building
+      float uniqueRnd = fract(pixelRnd + buildingSeed);
+
+      // Threshold: bright windows only, and sparse (top 10%)
+      float brightness = max(emissiveColor.r, max(emissiveColor.g, emissiveColor.b));
+
+      if (brightness > 0.2 && uniqueRnd > 0.85) {
+          // Varied speed and phase
+          float speed = 1.5 + uniqueRnd * 1.5; 
+          float phase = uniqueRnd * 6.28 + buildingSeed * 10.0;
+          
+          float blink = step(0.5, sin(time * speed + phase));
+          emissiveColor.rgb *= blink;
+      }
+
+      totalEmissiveRadiance *= emissiveColor.rgb;
+    #endif
+    `
+  );
+};
+
 function generateCity(pathCurve, numBuildings) {
   const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
-  // Re-use materials with different colors if needed, but here's a base one
-  const buildingMat = new THREE.MeshStandardMaterial({
-    color: 0x111111,
-    roughness: 0.9, // Matte surface to avoid sun reflections/glare circles
-    metalness: 0.1, // Reduced metalness to prevent metallic shine
-    emissiveMap: windowTexture,
-    emissive: 0xffffff,
-    emissiveIntensity: 0.8
-  });
+  // buildingMat is now defined globally above
 
 
   const cityGroup = new THREE.Group();
@@ -442,14 +518,15 @@ function generateCity(pathCurve, numBuildings) {
 
   points.forEach((point, index) => {
     if (index === 0) return; // Skip start
+    if (point.x < -2100) return; // Stop city before bridge
 
     const tangent = pathCurve.getTangentAt(index / numBuildings);
     const up = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
 
     // 1. Streetlights (Closer to road)
-    // Place every 3rd point roughly
-    if (index % 3 === 0) {
+    // Reduce count: Place every 6th point roughly
+    if (index % 6 === 0) {
       [-1, 1].forEach((side) => {
           const lampDist = 12; // Just outside road width (which is 18, so half is 9)
           const lampPos = new THREE.Vector3().copy(point).add(right.clone().multiplyScalar(side * lampDist));
@@ -458,6 +535,16 @@ function generateCity(pathCurve, numBuildings) {
           pole.position.copy(lampPos);
           pole.position.y = 4; // 8 units tall, center at 4
           cityGroup.add(pole);
+
+          // Add physics for the pole
+          // Using Box for simplicity and alignment (0.1 rad -> 0.2 width -> 0.1 halfExtents)
+          const poleShape = new CANNON.Box(new CANNON.Vec3(0.1, 4, 0.1));
+          const poleBody = new CANNON.Body({
+            mass: 0, // Static
+            shape: poleShape
+          });
+          poleBody.position.copy(pole.position);
+          world.addBody(poleBody);
 
           const head = new THREE.Mesh(headGeo, poleMat);
           head.position.set(0, 4, 0); // relative to pole
@@ -489,7 +576,7 @@ function generateCity(pathCurve, numBuildings) {
 
     // 2. Main City Blocks (Mid-distance)
     [-1, 1].forEach((side) => {
-       if (Math.random() > 0.6) return;
+       if (Math.random() > 0.8) return; // Keep more buildings
 
        const dist = 25 + Math.random() * 40; // Closer/dense
        const pos = new THREE.Vector3().copy(point).add(right.clone().multiplyScalar(side * dist));
@@ -503,6 +590,15 @@ function generateCity(pathCurve, numBuildings) {
        mesh.position.y = height / 2 - 5; 
        mesh.scale.set(width, height, depth);
        mesh.lookAt(point.x, mesh.position.y, point.z); 
+       
+       const buildingShape = new CANNON.Box(new CANNON.Vec3(width / 2, height / 2, depth / 2));
+       const buildingBody = new CANNON.Body({
+         mass: 0, // Static
+         shape: buildingShape
+       });
+       buildingBody.position.copy(mesh.position);
+       buildingBody.quaternion.copy(mesh.quaternion);  // <--- Added rotation match
+       world.addBody(buildingBody);
        
        cityGroup.add(mesh);
     });
@@ -526,6 +622,17 @@ function generateCity(pathCurve, numBuildings) {
            mesh.lookAt(point.x, mesh.position.y, point.z); 
            cityGroup.add(mesh);
 
+           // Add physics for skyscraper
+           const skyScraperShape = new CANNON.Box(new CANNON.Vec3(width / 2, height / 2, depth / 2));
+           const skyScraperBody = new CANNON.Body({
+               mass: 0,
+               shape: skyScraperShape
+           });
+           skyScraperBody.position.copy(mesh.position);
+           // Match rotation of the mesh
+           skyScraperBody.quaternion.copy(mesh.quaternion);
+           world.addBody(skyScraperBody);
+
            // Blinking red beacon on top
            if (height > 250) {
                const bead = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
@@ -539,7 +646,152 @@ function generateCity(pathCurve, numBuildings) {
 }
 
 // Increase density
-generateCity(curve, 300);
+generateCity(curve, 600);
+
+function generateBridge(curve) {
+  const bridgeGroup = new THREE.Group();
+  scene.add(bridgeGroup);
+  
+  // Get points for the bridge section (approx x < -2200)
+  const allPoints = curve.getSpacedPoints(1200);
+  const bridgePoints = allPoints.filter(p => p.x < -2200 && p.x > -3000);
+  
+  if (bridgePoints.length === 0) return;
+
+  // Materials
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.7 });
+  const cableMat = new THREE.LineBasicMaterial({ color: 0xff3333, linewidth: 3 }); 
+  const railMat = new THREE.MeshStandardMaterial({ color: 0xaa3333 });
+
+  // 1. Towers (At start approx -2300 and end -2900)
+  // We can find points closest to these X values
+  const towerX1 = -2300;
+  const towerX2 = -2900;
+  
+  // Helper to place tower
+  const placeTower = (xPos) => {
+      // Find point on curve
+      const p = bridgePoints.reduce((prev, curr) => 
+        Math.abs(curr.x - xPos) < Math.abs(prev.x - xPos) ? curr : prev
+      );
+      
+      const height = 60;
+      
+      // Use grouping for tower
+      const tower = new THREE.Group();
+      tower.position.set(p.x, p.y, p.z); // Center at road point
+      
+      // Left Pillar
+      const tL = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), pillarMat);
+      tL.position.set(0, height/2 - 5, -15); // Local pos
+      tower.add(tL);
+      
+      // Right Pillar
+      const tR = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), pillarMat);
+      tR.position.set(0, height/2 - 5, 15);
+      tower.add(tR);
+      
+      // Cross beam
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 35), pillarMat);
+      beam.position.set(0, height - 5, 0);
+      tower.add(beam);
+
+      // Add physics for tower pillars
+      const pillarShape = new CANNON.Box(new CANNON.Vec3(2.5, height/2, 2.5));
+      
+      const bodyL = new CANNON.Body({ mass: 0, shape: pillarShape });
+      bodyL.position.set(p.x, p.y + height/2 - 5, p.z - 15);
+      world.addBody(bodyL);
+
+      const bodyR = new CANNON.Body({ mass: 0, shape: pillarShape });
+      bodyR.position.set(p.x, p.y + height/2 - 5, p.z + 15);
+      world.addBody(bodyR);
+      
+      bridgeGroup.add(tower);
+      
+      // Return world positions of tops for cable
+      return { 
+          topL: new THREE.Vector3(p.x, p.y + height - 2, p.z - 15), 
+          topR: new THREE.Vector3(p.x, p.y + height - 2, p.z + 15) 
+      };
+  };
+
+  const t1 = placeTower(towerX1);
+  const t2 = placeTower(towerX2);
+
+  // 2. Cables
+  // Simple straight lines connecting: Start -> T1 -> T2 -> End
+  const startP = bridgePoints[0];
+  const endP = bridgePoints[bridgePoints.length - 1];
+
+  const pointsL = [
+      new THREE.Vector3(startP.x, startP.y, startP.z - 15),
+      t1.topL,
+      t2.topL,
+      new THREE.Vector3(endP.x, endP.y, endP.z - 15)
+  ];
+  bridgeGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pointsL), cableMat));
+  
+  const pointsR = [
+      new THREE.Vector3(startP.x, startP.y, startP.z + 15),
+      t1.topR,
+      t2.topR,
+      new THREE.Vector3(endP.x, endP.y, endP.z + 15)
+  ];
+  bridgeGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pointsR), cableMat));
+
+  // 3. Railings / Side pillars along the span
+  bridgePoints.forEach((p, i) => {
+      // Small posts
+      if (i % 4 === 0) { 
+          const postGeo = new THREE.BoxGeometry(0.5, 3, 0.5);
+          
+          const pL = new THREE.Mesh(postGeo, railMat);
+          pL.position.set(p.x, p.y + 1.5, p.z - 10);
+          bridgeGroup.add(pL);
+          
+          const pR = new THREE.Mesh(postGeo, railMat);
+          pR.position.set(p.x, p.y + 1.5, p.z + 10);
+          bridgeGroup.add(pR);
+      }
+  });
+
+  // 4. Physics for Bridge Surface (Segmented Boxes)
+  // This ensures the car can drive up the bridge.
+  // We skip the first few points to avoid z-fighting with the ground plane where it starts
+  const skip = 5; 
+  for(let i = skip; i < bridgePoints.length - 1; i++) {
+        const p1 = bridgePoints[i];
+        const p2 = bridgePoints[i+1];
+        
+        const dist = p1.distanceTo(p2);
+        // Midpoint
+        const center = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+        
+        // Create box. Extents are half-sizes.
+        // Width 15 (creates 30 total width, road is 18, so plenty of margin)
+        // Height 0.5 (1 unit thick)
+        // Depth dist/2 (Length of segment)
+        // Add overlap (dist/2 + 0.5) to ensure smooth transition
+        const boxShape = new CANNON.Box(new CANNON.Vec3(15, 0.5, dist / 2 + 0.1));
+        
+        const body = new CANNON.Body({ mass: 0, material: groundMaterial });
+        body.addShape(boxShape);
+        body.position.set(center.x, center.y - 0.5, center.z); // Shift down slightly so surface matches visual
+
+        // Orientation
+        // Calculate tangent vector
+        const segment = new THREE.Vector3().subVectors(p2, p1).normalize();
+        
+        // Align Box Z-axis (length) with segment vector
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), segment);
+        body.quaternion.set(q.x, q.y, q.z, q.w);
+        
+        world.addBody(body);
+  }
+}
+
+generateBridge(curve);
 
 
 
@@ -760,6 +1012,10 @@ function animate() {
   // advance panel shaders time
   const t = clock.getElapsedTime();
   panels.updateTime(t);
+  
+  if (buildingMat.userData.shader) {
+      buildingMat.userData.shader.uniforms.time.value = t;
+  }
   // roadCylinderShaderMat logic removed
 
   if (physicsEnabled) {
