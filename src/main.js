@@ -267,7 +267,7 @@ const grassVertexShader = `
   varying vec2 vUv;
   varying vec3 vWorldPos;
   void main() {
-    vUv = uv * 50.0; // Tiling
+    vUv = uv * 250.0; // Tiling (Increased for larger plane)
     vec4 worldPos = modelMatrix * vec4(position, 1.0);
     vWorldPos = worldPos.xyz;
     gl_Position = projectionMatrix * viewMatrix * worldPos;
@@ -276,6 +276,24 @@ const grassVertexShader = `
 
 const grassFragmentShader = `
   varying vec2 vUv;
+  varying vec3 vWorldPos;
+  uniform float time;
+
+  float random(vec2 st) {
+      return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+  }
+
+  float noise(vec2 st) {
+      vec2 i = floor(st);
+      vec2 f = fract(st);
+      float a = random(i);
+      float b = random(i + vec2(1.0, 0.0));
+      float c = random(i + vec2(0.0, 1.0));
+      float d = random(i + vec2(1.0, 1.0));
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+  }
+
   void main() {
     // Dark city ground, maybe concrete/grass mix
     vec3 darkGreen = vec3(0.02, 0.05, 0.02);
@@ -286,6 +304,36 @@ const grassFragmentShader = `
     vec3 color = mix(darkGreen, concrete, 0.5);
     color += vec3(0.05) * grid; // faint grid lines
 
+    // River Logic (Under the bridge: x between -2300 and -2900)
+    // Let's create a wide river flowing perpendicular to the road?
+    // Bridge spans X. So river should span Z?
+    // Or is the bridge crossing a body of water?
+    // "Under the bridge I want to add river" implies the water is everywhere under it.
+    // Let's make water visible in the bridge X-range, for all Z.
+    
+    float bridgeStart = -2300.0;
+    float bridgeEnd = -2900.0;
+    float centerX = (bridgeStart + bridgeEnd) * 0.5;
+    float width = abs(bridgeStart - bridgeEnd) * 0.5; // Half width
+    
+    // Smooth edges (bank)
+    float dist = abs(vWorldPos.x - centerX);
+    float riverMask = 1.0 - smoothstep(width - 50.0, width + 50.0, dist);
+    
+    if (riverMask > 0.01) {
+        vec3 waterMin = vec3(0.0, 0.1, 0.3);
+        vec3 waterMax = vec3(0.0, 0.3, 0.6);
+        
+        float n = noise(vWorldPos.xz * 0.02 + time * 0.5);
+        vec3 waterColor = mix(waterMin, waterMax, n);
+        
+        // Specular highlight / foam
+        float foam = step(0.6, n);
+        waterColor += vec3(0.2) * foam;
+        
+        color = mix(color, waterColor, riverMask);
+    }
+
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -293,9 +341,12 @@ const grassFragmentShader = `
 const grassMaterial = new THREE.ShaderMaterial({
   vertexShader: grassVertexShader,
   fragmentShader: grassFragmentShader,
+  uniforms: {
+      time: { value: 0 }
+  }
 });
 
-const grassPlane = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), grassMaterial);
+const grassPlane = new THREE.Mesh(new THREE.PlaneGeometry(10000, 10000), grassMaterial);
 grassPlane.rotation.x = -Math.PI / 2;
 grassPlane.position.y = -0.5; // Slightly below road
 scene.add(grassPlane);
@@ -389,7 +440,7 @@ function aabbIntersect(meshA, meshB) {
 const rgbeLoader = new RGBELoader();
 rgbeLoader.load("./sky_4.hdr", (environmentMap) => {
   environmentMap.mapping = THREE.EquirectangularReflectionMapping;
-  // scene.background = environmentMap;
+  scene.background = environmentMap;
   scene.environment = environmentMap;
   // scene.background.rotation = Math.PI / 2
 });
@@ -659,102 +710,141 @@ function generateBridge(curve) {
   if (bridgePoints.length === 0) return;
 
   // Materials
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.7 });
-  const cableMat = new THREE.LineBasicMaterial({ color: 0xff3333, linewidth: 3 }); 
-  const railMat = new THREE.MeshStandardMaterial({ color: 0xaa3333 });
-
-  // 1. Towers (At start approx -2300 and end -2900)
-  // We can find points closest to these X values
-  const towerX1 = -2300;
-  const towerX2 = -2900;
+  const archMat = new THREE.MeshStandardMaterial({ color: 0xcc0000, roughness: 0.4, metalness: 0.3 });
   
-  // Helper to place tower
-  const placeTower = (xPos) => {
-      // Find point on curve
-      const p = bridgePoints.reduce((prev, curr) => 
-        Math.abs(curr.x - xPos) < Math.abs(prev.x - xPos) ? curr : prev
-      );
+  // Arch Bridge Structure (Truss Arch)
+  // The bridge spans roughly from x = -2300 to x = -2900 (length ~600)
+  
+  const startParam = bridgePoints[0]; // Start of bridge section on curve
+  const endParam = bridgePoints[bridgePoints.length - 1]; // End of bridge section on curve
+  
+  // We will build the arch based on the straight-line distance, but place elements along the curve path?
+  // Since the bridge section is perfectly straight (y=0, z=0 mainly, x changes), we can use simple math.
+  // Bridge X range:
+  const startX = -2300; 
+  const endX = -2900;
+  const bridgeLength = Math.abs(startX - endX);
+  const archHeight = 120;
+  
+  // Helper to place a beam (cylinder) between two points
+  const createBeam = (p1, p2, thickness = 0.8) => {
+      const vec = new THREE.Vector3().subVectors(p2, p1);
+      const len = vec.length();
+      const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
       
-      const height = 60;
+      const radius = thickness * 0.5;
+      const geo = new THREE.CylinderGeometry(radius, radius, len, 8);
+      const mesh = new THREE.Mesh(geo, archMat);
       
-      // Use grouping for tower
-      const tower = new THREE.Group();
-      tower.position.set(p.x, p.y, p.z); // Center at road point
+      mesh.position.copy(mid);
       
-      // Left Pillar
-      const tL = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), pillarMat);
-      tL.position.set(0, height/2 - 5, -11); // Local pos (closer to road edge)
-      tower.add(tL);
+      // Orientation
+      // Cylinder default points up (Y)
+      // We need to rotate it to match 'vec'
+      const axis = new THREE.Vector3(0, 1, 0);
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(axis, vec.normalize());
+      mesh.quaternion.copy(quaternion);
       
-      // Right Pillar
-      const tR = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), pillarMat);
-      tR.position.set(0, height/2 - 5, 11); // Local pos (closer to road edge)
-      tower.add(tR);
-      
-      // Cross beam
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 27), pillarMat); // Shortened beam
-      beam.position.set(0, height - 5, 0);
-      tower.add(beam);
+      bridgeGroup.add(mesh);
 
-      // Add physics for tower pillars
-      const pillarShape = new CANNON.Box(new CANNON.Vec3(2.5, height/2, 2.5));
-      
-      const bodyL = new CANNON.Body({ mass: 0, shape: pillarShape });
-      bodyL.position.set(p.x, p.y + height/2 - 5, p.z - 11);
-      world.addBody(bodyL);
-
-      const bodyR = new CANNON.Body({ mass: 0, shape: pillarShape });
-      bodyR.position.set(p.x, p.y + height/2 - 5, p.z + 11);
-      world.addBody(bodyR);
-      
-      bridgeGroup.add(tower);
-      
-      // Return world positions of tops for cable
-      return { 
-          topL: new THREE.Vector3(p.x, p.y + height - 2, p.z - 11), 
-          topR: new THREE.Vector3(p.x, p.y + height - 2, p.z + 11) 
-      };
+      // Physics for the beam (Box approximation)
+      // Box uses half-extents. We want a box tall in Y-axis to match the cylinder rotation.
+      // Extents: radius, len/2, radius
+      const shape = new CANNON.Box(new CANNON.Vec3(radius, len / 2, radius));
+      const body = new CANNON.Body({ mass: 0 }); // Static
+      body.addShape(shape);
+      body.position.copy(mid);
+      body.quaternion.copy(quaternion);
+      world.addBody(body);
   };
-
-  const t1 = placeTower(towerX1);
-  const t2 = placeTower(towerX2);
-
-  // 2. Cables
-  // Simple straight lines connecting: Start -> T1 -> T2 -> End
-  const startP = bridgePoints[0];
-  const endP = bridgePoints[bridgePoints.length - 1];
-
-  const pointsL = [
-      new THREE.Vector3(startP.x, startP.y, startP.z - 11),
-      t1.topL,
-      t2.topL,
-      new THREE.Vector3(endP.x, endP.y, endP.z - 11)
-  ];
-  bridgeGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pointsL), cableMat));
   
-  const pointsR = [
-      new THREE.Vector3(startP.x, startP.y, startP.z + 11),
-      t1.topR,
-      t2.topR,
-      new THREE.Vector3(endP.x, endP.y, endP.z + 11)
-  ];
-  bridgeGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pointsR), cableMat));
+  // Generate Arch
+  const segments = 20; // Number of bays in the truss
+  const segmentLen = bridgeLength / segments;
+  
+  // We will create two arches: Left (z = -9) and Right (z = 9)
+  // The road is width 18, so +/- 9 is the edge.
+  const zOffsets = [-9, 9];
+  
+  zOffsets.forEach(zOffset => {
+      let prevTop = null;
+      let prevBottom = null;
+      
+      for (let i = 0; i <= segments; i++) {
+          // X position
+          const x = startX - (i * segmentLen); // Moving negative X
+          
+          // Normalized progress for parabola (0 to 1 -> 0)
+          // Parabola: y = 4 * height * t * (1-t)
+          const t = i / segments;
+          const yArch = 4 * archHeight * t * (1 - t);
+          
+          // Current Points
+          const pBottom = new THREE.Vector3(x, 0, zOffset); // Road Deck Level
+          const pTop = new THREE.Vector3(x, yArch, zOffset); // Arch Current Height
+          
+          // 1. Vertical Post (Strut)
+          if (yArch > 1) {
+             createBeam(pBottom, pTop, 1.2);
+          }
+          
+          // 2. Connect to previous step
+          if (i > 0) {
+             // Top Chord (Arch curve)
+             createBeam(prevTop, pTop, 1.5);
+             
+             // Bottom Chord (Road Deck side rail)
+             createBeam(prevBottom, pBottom, 1.5);
+             
+             // Diagonal Bracing (Zig-Zag)
+             // From Top(i-1) to Bottom(i) OR Bottom(i-1) to Top(i)
+             // Let's do a simple bracing
+             createBeam(prevTop, pBottom, 0.8);
+          }
+           
+          // Top Horizontal Bracing (Connecting Left and Right Arches)
+          // We must do this outside the loop loop? No, inside is fine if we reference the other side.
+          // Actually, let's do top bracing separately or just rely on visual stability.
+          // For a "through arch", there is often bracing between the two arches at the top.
+          if (zOffset === -9) {
+             // If we are on left side, modify the loop logic? 
+             // Easies to just add cross beams separately.
+          }
 
-  // 3. Railings / Side pillars along the span
-  bridgePoints.forEach((p, i) => {
-      // Small posts
-      if (i % 4 === 0) { 
-          const postGeo = new THREE.BoxGeometry(0.5, 3, 0.5);
-          
-          const pL = new THREE.Mesh(postGeo, railMat);
-          pL.position.set(p.x, p.y + 1.5, p.z - 9.25);
-          bridgeGroup.add(pL);
-          
-          const pR = new THREE.Mesh(postGeo, railMat);
-          pR.position.set(p.x, p.y + 1.5, p.z + 9.25);
-          bridgeGroup.add(pR);
+          prevTop = pTop;
+          prevBottom = pBottom;
       }
   });
+
+  // Cross Bracing between the two arches (Top)
+  for (let i = 0; i <= segments; i++) {
+        const x = startX - (i * segmentLen);
+        const t = i / segments;
+        const yArch = 4 * archHeight * t * (1 - t);
+        
+        // Only brace if high enough to clear vehicles (e.g., > 15 units)
+        if (yArch > 20) {
+            const pLeft = new THREE.Vector3(x, yArch, -9);
+            const pRight = new THREE.Vector3(x, yArch, 9);
+            createBeam(pLeft, pRight, 0.8); // Straight cross beam
+            
+            // X-bracing between segments
+            if (i > 0) {
+                const prevX = startX - ((i-1) * segmentLen);
+                const prevT = (i-1) / segments;
+                const prevY = 4 * archHeight * prevT * (1 - prevT);
+                
+                if (prevY > 20) {
+                     const prevLeft = new THREE.Vector3(prevX, prevY, -9);
+                     const prevRight = new THREE.Vector3(prevX, prevY, 9);
+                     
+                     // Cross diagonals
+                     createBeam(prevLeft, pRight, 0.6);
+                     createBeam(prevRight, pLeft, 0.6);
+                }
+            }
+        }
+  }
 
   // 4. Physics for Bridge Surface (Segmented Boxes)
   // This ensures the car can drive up the bridge.
@@ -1015,6 +1105,10 @@ function animate() {
   
   if (buildingMat.userData.shader) {
       buildingMat.userData.shader.uniforms.time.value = t;
+  }
+  // Update grass/river shader time
+  if (grassMaterial.uniforms && grassMaterial.uniforms.time) {
+      grassMaterial.uniforms.time.value = t;
   }
   // roadCylinderShaderMat logic removed
 
