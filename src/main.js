@@ -13,6 +13,62 @@ import { EXRLoader } from "three/examples/jsm/loaders/EXRLoader.js";
 import { Car } from "./car.js";
 import { createPlane } from "./intro.js";
 
+// ===== LOADING MANAGER =====
+const loadingManager = new THREE.LoadingManager();
+
+const progressFill = document.getElementById('progress-fill');
+const loadingStatus = document.getElementById('loading-status');
+const loadingPercent = document.getElementById('loading-percent');
+const controlsHint = document.getElementById('controls-hint');
+const loadingScreen = document.getElementById('loading-screen');
+
+loadingManager.onProgress = (url, loaded, total) => {
+    const percent = Math.round((loaded / total) * 100);
+    if (progressFill) progressFill.style.width = percent + '%';
+    if (loadingPercent) loadingPercent.textContent = percent + '%';
+    
+    // Update status text based on file type
+    const fileName = url.split('/').pop();
+    if (fileName.endsWith('.hdr') || fileName.endsWith('.exr')) {
+        if (loadingStatus) loadingStatus.textContent = 'LOADING ENVIRONMENT';
+    } else if (fileName.endsWith('.glb') || fileName.endsWith('.gltf')) {
+        if (loadingStatus) loadingStatus.textContent = 'LOADING MODELS';
+    } else {
+        if (loadingStatus) loadingStatus.textContent = 'LOADING ASSETS';
+    }
+};
+
+loadingManager.onLoad = () => {
+    if (progressFill) progressFill.style.width = '100%';
+    if (loadingPercent) loadingPercent.textContent = '100%';
+    if (loadingStatus) loadingStatus.textContent = 'READY TO RACE';
+    if (controlsHint) controlsHint.classList.add('visible');
+    
+    // Fade out after a short delay
+    setTimeout(() => {
+        if (loadingScreen) loadingScreen.classList.add('fade-out');
+        // Signal UI panels to show
+        window.__loadingComplete = true;
+        window.dispatchEvent(new Event('loadingComplete'));
+    }, 1200);
+};
+
+// Fallback: If no managed assets, dismiss after scene setup
+setTimeout(() => {
+    if (loadingScreen && !loadingScreen.classList.contains('fade-out')) {
+        if (progressFill) progressFill.style.width = '100%';
+        if (loadingPercent) loadingPercent.textContent = '100%';
+        if (loadingStatus) loadingStatus.textContent = 'READY TO RACE';
+        if (controlsHint) controlsHint.classList.add('visible');
+        setTimeout(() => {
+            loadingScreen.classList.add('fade-out');
+            // Signal UI panels to show
+            window.__loadingComplete = true;
+            window.dispatchEvent(new Event('loadingComplete'));
+        }, 1200);
+    }
+}, 8000); // 8s max fallback
+
 const scene = new THREE.Scene();
 
 const light = new THREE.DirectionalLight();
@@ -128,6 +184,17 @@ const curve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-2800, 0, 0), // Flat
   new THREE.Vector3(-3000, 0, 0), // End bridge
   new THREE.Vector3(-3200, 0, 0),
+  // Second City Section
+  new THREE.Vector3(-3400, 0, 0),
+  new THREE.Vector3(-3600, 0, 40),
+  new THREE.Vector3(-3800, 0, -40),
+  new THREE.Vector3(-4000, 0, 0),
+  new THREE.Vector3(-4200, 0, 0),
+  new THREE.Vector3(-4400, 0, 40),
+  new THREE.Vector3(-4600, 0, -40),
+  new THREE.Vector3(-4800, 0, 0),
+  new THREE.Vector3(-5000, 0, 0),
+  new THREE.Vector3(-5200, 0, 0),
 ]);
 
 // Helper to visualize the curve (optional, for debugging)
@@ -437,7 +504,7 @@ function aabbIntersect(meshA, meshB) {
 // Physics for road cylinders removed
 
 //load a hdri using RGBELoader
-const rgbeLoader = new RGBELoader();
+const rgbeLoader = new RGBELoader(loadingManager);
 rgbeLoader.load("./sky_4.hdr", (environmentMap) => {
   environmentMap.mapping = THREE.EquirectangularReflectionMapping;
   scene.background = environmentMap;
@@ -699,6 +766,119 @@ function generateCity(pathCurve, numBuildings) {
 // Increase density
 generateCity(curve, 600);
 
+// Second City after the bridge (x < -3100)
+function generateCity2(pathCurve, numBuildings) {
+  const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
+  const cityGroup = new THREE.Group();
+  scene.add(cityGroup);
+
+  const points = pathCurve.getSpacedPoints(numBuildings);
+  
+  // Streetlamp geometries
+  const poleGeo = new THREE.CylinderGeometry(0.1, 0.1, 8, 8);
+  const headGeo = new THREE.BoxGeometry(1.5, 0.2, 0.5);
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+
+  points.forEach((point, index) => {
+    if (index === 0) return;
+    // Only place buildings AFTER the bridge (x < -3100)
+    if (point.x > -3100) return;
+
+    const tangent = pathCurve.getTangentAt(index / numBuildings);
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
+
+    // 1. Streetlights
+    if (index % 6 === 0) {
+      [-1, 1].forEach((side) => {
+          const lampDist = 12;
+          const lampPos = new THREE.Vector3().copy(point).add(right.clone().multiplyScalar(side * lampDist));
+          
+          const pole = new THREE.Mesh(poleGeo, poleMat);
+          pole.position.copy(lampPos);
+          pole.position.y = 4;
+          cityGroup.add(pole);
+
+          const poleShape = new CANNON.Box(new CANNON.Vec3(0.1, 4, 0.1));
+          const poleBody = new CANNON.Body({ mass: 0, shape: poleShape });
+          poleBody.position.copy(pole.position);
+          world.addBody(poleBody);
+
+          const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.2), bulbMat);
+          bulb.position.set(0, 3.8, side === 1 ? -0.4 : 0.4).add(lampPos);
+          cityGroup.add(bulb);
+
+          const headWorld = new THREE.Mesh(headGeo, poleMat);
+          headWorld.position.copy(lampPos).add(new THREE.Vector3(0, 4, 0));
+          headWorld.lookAt(point);
+          cityGroup.add(headWorld);
+      });
+    }
+
+    // 2. Main City Blocks
+    [-1, 1].forEach((side) => {
+       if (Math.random() > 0.8) return;
+
+       const dist = 25 + Math.random() * 40;
+       const pos = new THREE.Vector3().copy(point).add(right.clone().multiplyScalar(side * dist));
+       
+       const width = 15 + Math.random() * 10;
+       const depth = 15 + Math.random() * 10;
+       const height = 40 + Math.random() * 120;
+
+       const mesh = new THREE.Mesh(buildingGeo, buildingMat);
+       mesh.position.copy(pos);
+       mesh.position.y = height / 2 - 5; 
+       mesh.scale.set(width, height, depth);
+       mesh.lookAt(point.x, mesh.position.y, point.z); 
+       
+       const buildingShape = new CANNON.Box(new CANNON.Vec3(width / 2, height / 2, depth / 2));
+       const buildingBody = new CANNON.Body({ mass: 0, shape: buildingShape });
+       buildingBody.position.copy(mesh.position);
+       buildingBody.quaternion.copy(mesh.quaternion);
+       world.addBody(buildingBody);
+       
+       cityGroup.add(mesh);
+    });
+
+    // 3. Mega Skyscrapers
+    if (index % 5 === 0) {
+       [-1, 1].forEach((side) => {
+           if (Math.random() > 0.5) return;
+           const dist = 80 + Math.random() * 80;
+           const pos = new THREE.Vector3().copy(point).add(right.clone().multiplyScalar(side * dist));
+           
+           const width = 30 + Math.random() * 30;
+           const depth = 30 + Math.random() * 30;
+           const height = 150 + Math.random() * 200;
+
+           const mesh = new THREE.Mesh(buildingGeo, buildingMat);
+           mesh.position.copy(pos);
+           mesh.position.y = height / 2 - 10;
+           mesh.scale.set(width, height, depth);
+           mesh.lookAt(point.x, mesh.position.y, point.z); 
+           cityGroup.add(mesh);
+
+           const skyScraperShape = new CANNON.Box(new CANNON.Vec3(width / 2, height / 2, depth / 2));
+           const skyScraperBody = new CANNON.Body({ mass: 0, shape: skyScraperShape });
+           skyScraperBody.position.copy(mesh.position);
+           skyScraperBody.quaternion.copy(mesh.quaternion);
+           world.addBody(skyScraperBody);
+
+           if (height > 250) {
+               const bead = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+               bead.position.copy(pos);
+               bead.position.y = height - 10;
+               cityGroup.add(bead);
+           }
+       });
+    }
+  });
+}
+
+generateCity2(curve, 800);
+
 function generateBridge(curve) {
   const bridgeGroup = new THREE.Group();
   scene.add(bridgeGroup);
@@ -721,10 +901,10 @@ function generateBridge(curve) {
   // We will build the arch based on the straight-line distance, but place elements along the curve path?
   // Since the bridge section is perfectly straight (y=0, z=0 mainly, x changes), we can use simple math.
   // Bridge X range:
-  const startX = -2300; 
-  const endX = -2900;
+  const startX = -2200; 
+  const endX = -3000;
   const bridgeLength = Math.abs(startX - endX);
-  const archHeight = 120;
+  const archHeight = 160;
   
   // Helper to place a beam (cylinder) between two points
   const createBeam = (p1, p2, thickness = 0.8) => {
@@ -759,12 +939,12 @@ function generateBridge(curve) {
   };
   
   // Generate Arch
-  const segments = 20; // Number of bays in the truss
+  const segments = 30; // Number of bays in the truss
   const segmentLen = bridgeLength / segments;
   
-  // We will create two arches: Left (z = -9) and Right (z = 9)
-  // The road is width 18, so +/- 9 is the edge.
-  const zOffsets = [-9, 9];
+  // We will create two arches: Left (z = -12) and Right (z = 12)
+  // Wider than road for visual impact.
+  const zOffsets = [-12, 12];
   
   zOffsets.forEach(zOffset => {
       let prevTop = null;
@@ -785,30 +965,27 @@ function generateBridge(curve) {
           
           // 1. Vertical Post (Strut)
           if (yArch > 1) {
-             createBeam(pBottom, pTop, 1.2);
+             createBeam(pBottom, pTop, 3.0);
           }
           
           // 2. Connect to previous step
           if (i > 0) {
              // Top Chord (Arch curve)
-             createBeam(prevTop, pTop, 1.5);
+             createBeam(prevTop, pTop, 3.5);
              
              // Bottom Chord (Road Deck side rail)
-             createBeam(prevBottom, pBottom, 1.5);
+             createBeam(prevBottom, pBottom, 3.5);
              
              // Diagonal Bracing (Zig-Zag)
-             // From Top(i-1) to Bottom(i) OR Bottom(i-1) to Top(i)
-             // Let's do a simple bracing
-             createBeam(prevTop, pBottom, 0.8);
+             createBeam(prevTop, pBottom, 2.0);
           }
            
           // Top Horizontal Bracing (Connecting Left and Right Arches)
           // We must do this outside the loop loop? No, inside is fine if we reference the other side.
           // Actually, let's do top bracing separately or just rely on visual stability.
           // For a "through arch", there is often bracing between the two arches at the top.
-          if (zOffset === -9) {
-             // If we are on left side, modify the loop logic? 
-             // Easies to just add cross beams separately.
+          if (zOffset === -12) {
+             // Cross beams handled separately below
           }
 
           prevTop = pTop;
@@ -822,11 +999,11 @@ function generateBridge(curve) {
         const t = i / segments;
         const yArch = 4 * archHeight * t * (1 - t);
         
-        // Only brace if high enough to clear vehicles (e.g., > 15 units)
+        // Only brace if high enough to clear vehicles
         if (yArch > 20) {
-            const pLeft = new THREE.Vector3(x, yArch, -9);
-            const pRight = new THREE.Vector3(x, yArch, 9);
-            createBeam(pLeft, pRight, 0.8); // Straight cross beam
+            const pLeft = new THREE.Vector3(x, yArch, -12);
+            const pRight = new THREE.Vector3(x, yArch, 12);
+            createBeam(pLeft, pRight, 2.0); // Straight cross beam
             
             // X-bracing between segments
             if (i > 0) {
@@ -835,12 +1012,12 @@ function generateBridge(curve) {
                 const prevY = 4 * archHeight * prevT * (1 - prevT);
                 
                 if (prevY > 20) {
-                     const prevLeft = new THREE.Vector3(prevX, prevY, -9);
-                     const prevRight = new THREE.Vector3(prevX, prevY, 9);
+                     const prevLeft = new THREE.Vector3(prevX, prevY, -12);
+                     const prevRight = new THREE.Vector3(prevX, prevY, 12);
                      
                      // Cross diagonals
-                     createBeam(prevLeft, pRight, 0.6);
-                     createBeam(prevRight, pLeft, 0.6);
+                     createBeam(prevLeft, pRight, 1.5);
+                     createBeam(prevRight, pLeft, 1.5);
                 }
             }
         }
@@ -993,7 +1170,7 @@ controls.enabled = false;
 
 let carModel1;
 /// Load and add the car model to the car body mesh
-const carLoader1 = new GLTFLoader();
+const carLoader1 = new GLTFLoader(loadingManager);
 carLoader1.load("./car_lab.glb", (gltf) => {
   carModel1 = gltf.scene;
   scene.add(carModel1);

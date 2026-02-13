@@ -114,6 +114,7 @@ function Panel() {
     ArrowRight: 'KeyD',
   };
   const [visible, setVisible] = useState(true);
+  const [loadingDone, setLoadingDone] = useState(false);
   // Remove score logic
   // const [score, setScore] = useState(0);
   const [pressed, setPressed] = useState({});
@@ -146,12 +147,22 @@ function Panel() {
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKey);
+
+    // Listen for loading complete event
+    const onLoadingComplete = () => setLoadingDone(true);
+    window.addEventListener('loadingComplete', onLoadingComplete);
+    // If already completed before mount
+    if (window.__loadingComplete) setLoadingDone(true);
+
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKey);
+      window.removeEventListener('loadingComplete', onLoadingComplete);
       window.setPlaneCollected = undefined;
     };
   }, []);
+
+  if (!loadingDone) return null;
 
   return (
     <>
@@ -464,6 +475,16 @@ function CongratulationsOverlay() {
 
 // Small instruction text at left corner
 function InstructionHint() {
+  const [loadingDone, setLoadingDone] = useState(false);
+  useEffect(() => {
+    const onLoadingComplete = () => setLoadingDone(true);
+    window.addEventListener('loadingComplete', onLoadingComplete);
+    if (window.__loadingComplete) setLoadingDone(true);
+    return () => window.removeEventListener('loadingComplete', onLoadingComplete);
+  }, []);
+
+  if (!loadingDone) return null;
+
   return (
     <div style={{
       position: 'fixed',

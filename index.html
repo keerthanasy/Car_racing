@@ -1,19 +1,497 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <title>Resistor Calculator</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>City Racing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap"
+        rel="stylesheet">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
+            overflow: hidden;
+            background: #000;
         }
 
         canvas {
             display: block;
         }
+
+        /* ===== LOADING SCREEN ===== */
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 30%, #0d1b2a 60%, #0a0a1a 100%);
+            transition: opacity 0.8s ease, visibility 0.8s ease;
+        }
+
+        #loading-screen.fade-out {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        /* Animated background particles */
+        #loading-screen::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                radial-gradient(2px 2px at 20% 30%, rgba(255, 255, 255, 0.3), transparent),
+                radial-gradient(2px 2px at 40% 70%, rgba(255, 255, 255, 0.2), transparent),
+                radial-gradient(1px 1px at 60% 20%, rgba(255, 255, 255, 0.4), transparent),
+                radial-gradient(1px 1px at 80% 50%, rgba(255, 255, 255, 0.2), transparent),
+                radial-gradient(2px 2px at 10% 80%, rgba(255, 255, 255, 0.15), transparent),
+                radial-gradient(1px 1px at 90% 10%, rgba(255, 255, 255, 0.3), transparent),
+                radial-gradient(1px 1px at 50% 90%, rgba(255, 255, 255, 0.25), transparent);
+            animation: twinkle 4s ease-in-out infinite alternate;
+        }
+
+        @keyframes twinkle {
+            0% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .loading-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }
+
+        /* Title */
+        .loading-title {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 900;
+            font-size: 3.5rem;
+            color: transparent;
+            background: linear-gradient(90deg, #ff4444, #ff8800, #ff4444);
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            animation: shimmer 2s ease-in-out infinite;
+            text-shadow: 0 0 40px rgba(255, 68, 68, 0.3);
+            letter-spacing: 4px;
+        }
+
+        @keyframes shimmer {
+
+            0%,
+            100% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+        }
+
+        .loading-subtitle {
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 300;
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.5);
+            letter-spacing: 8px;
+            text-transform: uppercase;
+        }
+
+        /* Car Animation */
+        .car-animation {
+            position: relative;
+            width: 300px;
+            height: 80px;
+            margin: 20px 0;
+        }
+
+        .car-silhouette {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px;
+            height: 30px;
+        }
+
+        .car-body {
+            position: absolute;
+            bottom: 8px;
+            left: 5px;
+            width: 70px;
+            height: 18px;
+            background: linear-gradient(180deg, #cc0000, #880000);
+            border-radius: 8px 12px 3px 3px;
+            box-shadow: 0 0 20px rgba(204, 0, 0, 0.4);
+        }
+
+        .car-body::before {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: 15px;
+            width: 35px;
+            height: 12px;
+            background: linear-gradient(180deg, #aa0000, #770000);
+            border-radius: 6px 8px 0 0;
+        }
+
+        .car-body::after {
+            content: '';
+            position: absolute;
+            top: -8px;
+            left: 18px;
+            width: 29px;
+            height: 8px;
+            background: rgba(100, 180, 255, 0.4);
+            border-radius: 4px 6px 0 0;
+        }
+
+        .wheel {
+            position: absolute;
+            bottom: 2px;
+            width: 14px;
+            height: 14px;
+            background: radial-gradient(circle, #444, #111);
+            border-radius: 50%;
+            border: 2px solid #666;
+            animation: spin 0.4s linear infinite;
+        }
+
+        .wheel-front {
+            left: 55px;
+        }
+
+        .wheel-rear {
+            left: 10px;
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Road line under car */
+        .road-line {
+            position: absolute;
+            bottom: 4px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg,
+                    transparent 0%,
+                    rgba(255, 255, 255, 0.1) 20%,
+                    rgba(255, 255, 255, 0.3) 50%,
+                    rgba(255, 255, 255, 0.1) 80%,
+                    transparent 100%);
+        }
+
+        /* Dashed center line */
+        .road-dashes {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 300%;
+            height: 2px;
+            background: repeating-linear-gradient(90deg,
+                    rgba(255, 200, 0, 0.6) 0px,
+                    rgba(255, 200, 0, 0.6) 15px,
+                    transparent 15px,
+                    transparent 30px);
+            animation: dashMove 0.6s linear infinite;
+        }
+
+        @keyframes dashMove {
+            from {
+                transform: translateX(0);
+            }
+
+            to {
+                transform: translateX(-30px);
+            }
+        }
+
+        /* Speed lines */
+        .speed-lines {
+            position: absolute;
+            top: 50%;
+            right: 60%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .speed-line {
+            width: 40px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
+            animation: speedLine 0.8s ease-in-out infinite;
+        }
+
+        .speed-line:nth-child(1) {
+            width: 30px;
+            animation-delay: 0s;
+        }
+
+        .speed-line:nth-child(2) {
+            width: 50px;
+            animation-delay: 0.2s;
+        }
+
+        .speed-line:nth-child(3) {
+            width: 35px;
+            animation-delay: 0.4s;
+        }
+
+        @keyframes speedLine {
+
+            0%,
+            100% {
+                opacity: 0.2;
+                transform: translateX(0);
+            }
+
+            50% {
+                opacity: 0.8;
+                transform: translateX(-10px);
+            }
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff4444, #ff8800);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 12px rgba(255, 68, 68, 0.5);
+            position: relative;
+        }
+
+        .progress-bar-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: progressShine 1.5s ease-in-out infinite;
+        }
+
+        @keyframes progressShine {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .progress-text {
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.4);
+            letter-spacing: 3px;
+        }
+
+        .progress-percent {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            font-size: 1rem;
+            color: rgba(255, 136, 0, 0.8);
+        }
+
+        /* Controls hint */
+        .controls-hint {
+            margin-top: 30px;
+            display: flex;
+            gap: 30px;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .controls-hint.visible {
+            opacity: 1;
+        }
+
+        .control-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .key-icon {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            min-width: 38px;
+            text-align: center;
+        }
+
+        .control-label {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.3);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /* Pulse ring behind title */
+        .pulse-ring {
+            position: absolute;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 68, 68, 0.1);
+            animation: pulse 3s ease-in-out infinite;
+        }
+
+        .pulse-ring:nth-child(2) {
+            animation-delay: 1s;
+            width: 250px;
+            height: 250px;
+        }
+
+        .pulse-ring:nth-child(3) {
+            animation-delay: 2s;
+            width: 300px;
+            height: 300px;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+
+            50% {
+                transform: scale(1.2);
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 
 <body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring"></div>
+
+        <div class="loading-content">
+            <h1 class="loading-title">CITY RACER</h1>
+            <p class="loading-subtitle">Preparing your ride</p>
+
+            <!-- Animated Car -->
+            <div class="car-animation">
+                <div class="speed-lines">
+                    <div class="speed-line"></div>
+                    <div class="speed-line"></div>
+                    <div class="speed-line"></div>
+                </div>
+                <div class="car-silhouette">
+                    <div class="car-body"></div>
+                    <div class="wheel wheel-front"></div>
+                    <div class="wheel wheel-rear"></div>
+                </div>
+                <div class="road-line"></div>
+                <div class="road-dashes"></div>
+            </div>
+
+            <!-- Progress -->
+            <div class="progress-container">
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progress-fill"></div>
+                </div>
+                <div style="display: flex; justify-content: space-between; width: 100%;">
+                    <span class="progress-text" id="loading-status">LOADING ASSETS</span>
+                    <span class="progress-percent" id="loading-percent">0%</span>
+                </div>
+            </div>
+
+            <!-- Controls Hint (shown when loading complete) -->
+            <div class="controls-hint" id="controls-hint">
+                <div class="control-item">
+                    <span class="key-icon">W</span>
+                    <span class="control-label">Accelerate</span>
+                </div>
+                <div class="control-item">
+                    <span class="key-icon">S</span>
+                    <span class="control-label">Brake</span>
+                </div>
+                <div class="control-item">
+                    <span class="key-icon">A/D</span>
+                    <span class="control-label">Steer</span>
+                </div>
+                <div class="control-item">
+                    <span class="key-icon">SPACE</span>
+                    <span class="control-label">Handbrake</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="./src/main.js"></script>
 </body>
+
+</html>
