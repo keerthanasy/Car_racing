@@ -124,8 +124,8 @@ const curve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-2200, 0, 0),
   // Bridge Section
   new THREE.Vector3(-2400, 0, 0), 
-  new THREE.Vector3(-2600, 20, 0), // Peak
-  new THREE.Vector3(-2800, 20, 0), // Flat
+  new THREE.Vector3(-2600, 0, 0), // Peak
+  new THREE.Vector3(-2800, 0, 0), // Flat
   new THREE.Vector3(-3000, 0, 0), // End bridge
   new THREE.Vector3(-3200, 0, 0),
 ]);
@@ -683,16 +683,16 @@ function generateBridge(curve) {
       
       // Left Pillar
       const tL = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), pillarMat);
-      tL.position.set(0, height/2 - 5, -15); // Local pos
+      tL.position.set(0, height/2 - 5, -11); // Local pos (closer to road edge)
       tower.add(tL);
       
       // Right Pillar
       const tR = new THREE.Mesh(new THREE.BoxGeometry(5, height, 5), pillarMat);
-      tR.position.set(0, height/2 - 5, 15);
+      tR.position.set(0, height/2 - 5, 11); // Local pos (closer to road edge)
       tower.add(tR);
       
       // Cross beam
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 35), pillarMat);
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 27), pillarMat); // Shortened beam
       beam.position.set(0, height - 5, 0);
       tower.add(beam);
 
@@ -700,19 +700,19 @@ function generateBridge(curve) {
       const pillarShape = new CANNON.Box(new CANNON.Vec3(2.5, height/2, 2.5));
       
       const bodyL = new CANNON.Body({ mass: 0, shape: pillarShape });
-      bodyL.position.set(p.x, p.y + height/2 - 5, p.z - 15);
+      bodyL.position.set(p.x, p.y + height/2 - 5, p.z - 11);
       world.addBody(bodyL);
 
       const bodyR = new CANNON.Body({ mass: 0, shape: pillarShape });
-      bodyR.position.set(p.x, p.y + height/2 - 5, p.z + 15);
+      bodyR.position.set(p.x, p.y + height/2 - 5, p.z + 11);
       world.addBody(bodyR);
       
       bridgeGroup.add(tower);
       
       // Return world positions of tops for cable
       return { 
-          topL: new THREE.Vector3(p.x, p.y + height - 2, p.z - 15), 
-          topR: new THREE.Vector3(p.x, p.y + height - 2, p.z + 15) 
+          topL: new THREE.Vector3(p.x, p.y + height - 2, p.z - 11), 
+          topR: new THREE.Vector3(p.x, p.y + height - 2, p.z + 11) 
       };
   };
 
@@ -725,18 +725,18 @@ function generateBridge(curve) {
   const endP = bridgePoints[bridgePoints.length - 1];
 
   const pointsL = [
-      new THREE.Vector3(startP.x, startP.y, startP.z - 15),
+      new THREE.Vector3(startP.x, startP.y, startP.z - 11),
       t1.topL,
       t2.topL,
-      new THREE.Vector3(endP.x, endP.y, endP.z - 15)
+      new THREE.Vector3(endP.x, endP.y, endP.z - 11)
   ];
   bridgeGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pointsL), cableMat));
   
   const pointsR = [
-      new THREE.Vector3(startP.x, startP.y, startP.z + 15),
+      new THREE.Vector3(startP.x, startP.y, startP.z + 11),
       t1.topR,
       t2.topR,
-      new THREE.Vector3(endP.x, endP.y, endP.z + 15)
+      new THREE.Vector3(endP.x, endP.y, endP.z + 11)
   ];
   bridgeGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pointsR), cableMat));
 
@@ -747,11 +747,11 @@ function generateBridge(curve) {
           const postGeo = new THREE.BoxGeometry(0.5, 3, 0.5);
           
           const pL = new THREE.Mesh(postGeo, railMat);
-          pL.position.set(p.x, p.y + 1.5, p.z - 10);
+          pL.position.set(p.x, p.y + 1.5, p.z - 9.25);
           bridgeGroup.add(pL);
           
           const pR = new THREE.Mesh(postGeo, railMat);
-          pR.position.set(p.x, p.y + 1.5, p.z + 10);
+          pR.position.set(p.x, p.y + 1.5, p.z + 9.25);
           bridgeGroup.add(pR);
       }
   });
