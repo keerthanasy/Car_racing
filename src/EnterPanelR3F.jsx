@@ -166,54 +166,7 @@ function Panel() {
 
   return (
     <>
-      {/* REMOVE <Score score={score} position="right" /> */}
       <KeysCard pressed={pressed} />
-      {visible && (
-        <div id="enter-panel-overlay-r3f" style={styles.overlay}>
-          <div style={styles.frame}>
-            <div style={styles.accent} />
-            <div style={styles.controlsTitle}>Controls</div>
-            <div style={styles.keysBoard}>
-              <div style={styles.rowCenter}>
-                <div style={styles.pairKey}>W / ↑</div>
-              </div>
-              <div style={styles.spacer} />
-              <div style={styles.row}>
-                <div style={styles.pairKey}>A / ←</div>
-                <div style={styles.pairKey}>S / ↓</div>
-                <div style={styles.pairKey}>D / →</div>
-              </div>
-              <div style={styles.spacer} />
-              <div style={styles.rowCenter}>
-                <div style={styles.spaceKey}>Space</div>
-              </div>
-            </div>
-            <div style={{ marginTop: 36 }} />
-            {/* 20 small boxes, 2 rows of 10, after all controls */}
-            {/* <div style={{ display: 'flex', flexDirection:'column', gap:10, alignItems:'center', justifyContent:'center' }}>
-              <div style={{display:'flex',gap:7}}>
-                {collectedArr.slice(0,10).map((c,i) => (
-                  <div key={i} style={{
-                    width:18, height:18, border:'1.5px solid #48adcf', borderRadius:4,
-                    background:c || '#2c2c39', boxShadow: c? '0 0 8px 2px '+(c)+'88' : 'none',
-                    transition:'background 0.24s',
-                  }} />
-                ))}
-              </div>
-              <div style={{display:'flex',gap:7}}>
-                {collectedArr.slice(10,20).map((c,i) => (
-                  <div key={10+i} style={{
-                    width:18, height:18, border:'1.5px solid #48adcf', borderRadius:4,
-                    background: c || '#2c2c39', boxShadow: c? '0 0 8px 2px '+(c)+'88' : 'none',
-                    transition:'background 0.24s',
-                  }} />
-                ))}
-              </div>
-            </div> */}
-            <h1 style={{ ...styles.title, marginTop: 18 }}>Press Enter to start the Journey</h1>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -473,45 +426,5 @@ function CongratulationsOverlay() {
   root.render(<CongratulationsOverlay />);
 })();
 
-// Small instruction text at left corner
-function InstructionHint() {
-  const [loadingDone, setLoadingDone] = useState(false);
-  useEffect(() => {
-    const onLoadingComplete = () => setLoadingDone(true);
-    window.addEventListener('loadingComplete', onLoadingComplete);
-    if (window.__loadingComplete) setLoadingDone(true);
-    return () => window.removeEventListener('loadingComplete', onLoadingComplete);
-  }, []);
+// Instruction hint removed
 
-  if (!loadingDone) return null;
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 22,
-      left: 22,
-      zIndex: 20,
-      fontFamily: 'Audiowide, system-ui, Segoe UI, Arial, sans-serif',
-      fontWeight: 800,
-      letterSpacing: '.06em',
-      color: '#c8f3ff',
-      textShadow: '0 1px 0 #0d5163, 0 0 6px #48a9d460',
-      background: 'none',
-      border: 'none',
-      borderRadius: 0,
-      padding: 0,
-      pointerEvents: 'none'
-    }}>
-      Move forward and collect the colors and values
-    </div>
-  );
-}
-
-// Mount instruction hint
-(function mountInstruction() {
-  if (typeof window === 'undefined') return;
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  root.render(<InstructionHint />);
-})();

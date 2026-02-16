@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import Stats from "stats-js";
-import { GUI } from "dat.gui";
+// import Stats from "stats-js";
 import * as CANNON from "cannon-es";
 import CannonDebugRenderer from "cannon-es-debugger";
 import "./EnterPanelR3F.jsx";
 import "./speedometer.jsx";
+import "./TaxiHUD.jsx";
+import { TaxiGame } from "./taxiGame.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
@@ -41,7 +42,7 @@ loadingManager.onProgress = (url, loaded, total) => {
 loadingManager.onLoad = () => {
     if (progressFill) progressFill.style.width = '100%';
     if (loadingPercent) loadingPercent.textContent = '100%';
-    if (loadingStatus) loadingStatus.textContent = 'READY TO RACE';
+    if (loadingStatus) loadingStatus.textContent = 'READY TO DRIVE';
     if (controlsHint) controlsHint.classList.add('visible');
     
     // Fade out after a short delay
@@ -58,7 +59,7 @@ setTimeout(() => {
     if (loadingScreen && !loadingScreen.classList.contains('fade-out')) {
         if (progressFill) progressFill.style.width = '100%';
         if (loadingPercent) loadingPercent.textContent = '100%';
-        if (loadingStatus) loadingStatus.textContent = 'READY TO RACE';
+        if (loadingStatus) loadingStatus.textContent = 'READY TO DRIVE';
         if (controlsHint) controlsHint.classList.add('visible');
         setTimeout(() => {
             loadingScreen.classList.add('fade-out');
@@ -1060,6 +1061,55 @@ function generateBridge(curve) {
 
 generateBridge(curve);
 
+// ===== TAXI GAME SYSTEM =====
+const taxiGame = new TaxiGame({ scene, roadCurve: curve });
+
+// Wire UI callbacks
+taxiGame.onTaskUpdate = (data) => {
+  if (window.__taxiHUD_onTaskUpdate) window.__taxiHUD_onTaskUpdate(data);
+};
+taxiGame.onEarningsUpdate = (earnings) => {
+  if (window.__taxiHUD_onEarningsUpdate) window.__taxiHUD_onEarningsUpdate(earnings);
+};
+taxiGame.onNotification = (msg, type) => {
+  if (window.__taxiHUD_onNotification) window.__taxiHUD_onNotification(msg, type);
+};
+
+// Expose direction helper for HUD
+window.__taxiGetDirInfo = () => {
+  if (!playerCar || !playerCar.mesh) return null;
+  return taxiGame.getDirectionTo(playerCar.mesh.position);
+};
+window.__taxiGetGameData = () => {
+  return taxiGame.getGameData();
+};
+
+// Expose minimap data for HUD
+// Pre-compute road points once for the minimap
+const _minimapRoadPoints = curve.getSpacedPoints(300).map(p => ({ x: p.x, z: p.z }));
+window.__minimapRoadPoints = _minimapRoadPoints;
+
+window.__minimapGetCarData = () => {
+  if (!playerCar || !playerCar.mesh) return null;
+  const pos = playerCar.mesh.position;
+  // Extract yaw from quaternion
+  const q = playerCar.mesh.quaternion;
+  const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+  return { x: pos.x, z: pos.z, yaw };
+};
+
+window.__minimapGetMarkers = () => {
+  const markers = [];
+  if (taxiGame.pickupMarker && taxiGame.pickupMarker.visible) {
+    const p = taxiGame.pickupMarker.position;
+    markers.push({ x: p.x, z: p.z, type: 'pickup' });
+  }
+  if (taxiGame.dropoffMarker && taxiGame.dropoffMarker.visible) {
+    const p = taxiGame.dropoffMarker.position;
+    markers.push({ x: p.x, z: p.z, type: 'dropoff' });
+  }
+  return markers;
+};
 
 
 // Ground physics body already created with Trimesh above
@@ -1177,74 +1227,7 @@ carLoader1.load("./car_lab.glb", (gltf) => {
   carModel1.position.set(0, -2.6, 50);
 });
 
-// GUI Setup
-// --- Car Debug GUI ---
-const gui = new GUI();
-const wheelFolder = gui.addFolder("Wheel Adjustment");
-
-const setupWheelGUI = (index, name) => {
-    const folder = wheelFolder.addFolder(name);
-    
-    // Get initial values safely
-    const pos = (playerCar && typeof playerCar.getWheelPosition === 'function') 
-        ? playerCar.getWheelPosition(index) 
-        : {x:0, y:0, z:0};
-    
-    // Proxy object to hold values for GUI
-    const proxy = { x: pos.x, y: pos.y, z: pos.z };
-    
-    folder.add(proxy, 'x', -3, 3, 0.01).onChange(v => {
-        if (playerCar) playerCar.updateWheelPosition(index, v, proxy.y, proxy.z);
-    });
-    folder.add(proxy, 'y', -2, 2, 0.01).onChange(v => {
-        if (playerCar) playerCar.updateWheelPosition(index, proxy.x, v, proxy.z);
-    });
-    folder.add(proxy, 'z', -4, 4, 0.01).onChange(v => {
-        if (playerCar) playerCar.updateWheelPosition(index, proxy.x, proxy.y, v);
-    });
-    folder.open();
-};
-
-if (playerCar) {
-    gui.add({ leftCorrection: -0.02 }, 'leftCorrection', -2.0, 1.0, 0.01)
-       .name('Left Wheels X Adjustment')
-       .onChange(v => {
-           if (playerCar) playerCar.updateLeftSideCorrection(v);
-       });
-
-    gui.add({ rightCorrection: 0.3 }, 'rightCorrection', -1.0, 2.0, 0.01)
-       .name('Right Wheels X Adjustment')
-       .onChange(v => {
-           if (playerCar) playerCar.updateRightSideCorrection(v);
-       });
-
-    setupWheelGUI(0, "Front Left");
-    setupWheelGUI(1, "Front Right");
-    setupWheelGUI(2, "Rear Left");
-    setupWheelGUI(3, "Rear Right");
-}
-
-const debugObj = { editMode: false };
-gui.add(debugObj, 'editMode').name('Edit & Orbit').onChange((val) => {
-    physicsEnabled = !val;
-    controls.enabled = val;
-    
-    if (val) {
-        // Edit Mode: Stop the car
-        if (playerCar && playerCar.body) {
-            playerCar.body.velocity.set(0,0,0);
-            playerCar.body.angularVelocity.set(0,0,0);
-        }
-    } else {
-        // Game Mode
-        // Logic to resume will be handled by the loop re-engaging physics
-    }
-});
-wheelFolder.open();
-
-// Help text overlay removed
-
-// GUI for background shader removed per request
+// GUI removed
 
 const maxSpeed = 20; // Set a common maximum speed for the car
 
@@ -1288,6 +1271,11 @@ function animate() {
       grassMaterial.uniforms.time.value = t;
   }
   // roadCylinderShaderMat logic removed
+
+  // Update Taxi Game
+  if (taxiGame && physicsEnabled) {
+    taxiGame.update(delta, playerCar.mesh.position);
+  }
 
   if (physicsEnabled) {
     // step using fixed timestep with substeps for stability
