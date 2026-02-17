@@ -3,7 +3,7 @@ import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import CannonDebugRenderer from "cannon-es-debugger";
 import "./EnterPanelR3F.jsx";
-import "./speedometer.jsx";
+// import "./speedometer.jsx"; // Speedometer removed
 import "./TaxiHUD.jsx";
 import { TaxiGame } from "./taxiGame.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";

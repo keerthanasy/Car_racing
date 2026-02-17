@@ -365,7 +365,7 @@ function EarningsPanel({ earnings, tasksCompleted }) {
             id="taxi-earnings-panel"
             style={{
                 position: "fixed",
-                top: 22,
+                top: 232,
                 right: 22,
                 zIndex: 100,
                 background:
@@ -528,7 +528,7 @@ function IdleStatus() {
         </div>
     );
 }
-// --- Minimap (Bottom-Left) ---
+// --- Minimap (Top-Right) ---
 function Minimap() {
     const canvasRef = useRef(null);
     const animRef = useRef(null);
@@ -743,8 +743,8 @@ function Minimap() {
         <div
             style={{
                 position: "fixed",
-                bottom: 22,
-                left: 22,
+                top: 22,
+                right: 22,
                 zIndex: 100,
                 borderRadius: "50%",
                 overflow: "hidden",
